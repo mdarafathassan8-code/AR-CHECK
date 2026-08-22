@@ -30,6 +30,12 @@ bool NovaExtensionServiceBridge::InstallCrx(const base::FilePath& path) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   if (!service() || path.empty()) return false;
   auto installer = extensions::CrxInstaller::CreateSilent(profile_);
+  // This is a user-initiated settings-style install, so allow a locally
+  // selected CRX instead of treating it as a Web Store download.
+  installer->set_off_store_install_allow_reason(
+      extensions::CrxInstaller::OffStoreInstallAllowedFromSettingsPage);
+  installer->set_allow_silent_install(true);
+  installer->set_was_triggered_by_user_download();
   installer->InstallCrx(path);
   return true;
 }
