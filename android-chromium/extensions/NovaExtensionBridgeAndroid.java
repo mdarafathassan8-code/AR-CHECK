@@ -1,6 +1,5 @@
 package org.chromium.nova.extensions;
 
-import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.annotations.NativeMethods;
 
@@ -8,20 +7,13 @@ import org.chromium.base.annotations.NativeMethods;
 public final class NovaExtensionBridgeAndroid {
     private long mNativeBridge;
 
-    public NovaExtensionBridgeAndroid(long nativeBridge) {
-        mNativeBridge = nativeBridge;
-    }
-
+    public NovaExtensionBridgeAndroid(long nativeBridge) { mNativeBridge = nativeBridge; }
     public boolean enable(String id) { return NovaExtensionBridgeAndroidJni.get().enable(mNativeBridge, id); }
     public boolean disable(String id) { return NovaExtensionBridgeAndroidJni.get().disable(mNativeBridge, id); }
     public boolean reload(String id) { return NovaExtensionBridgeAndroidJni.get().reload(mNativeBridge, id); }
     public boolean uninstall(String id) { return NovaExtensionBridgeAndroidJni.get().uninstall(mNativeBridge, id); }
     public String[] installedIds() { return NovaExtensionBridgeAndroidJni.get().installedIds(mNativeBridge); }
-
-    @CalledByNative
-    public static void onNativeBridgeDestroyed(NovaExtensionBridgeAndroid bridge) {
-        bridge.mNativeBridge = 0;
-    }
+    public void destroy() { mNativeBridge = 0; }
 
     @NativeMethods
     interface N {
@@ -30,9 +22,5 @@ public final class NovaExtensionBridgeAndroid {
         boolean reload(long nativeBridge, String id);
         boolean uninstall(long nativeBridge, String id);
         String[] installedIds(long nativeBridge);
-    }
-
-    private static class NovaExtensionBridgeAndroidJni {
-        static N get() { return org.chromium.nova.extensions.NovaExtensionBridgeAndroidJni.get(); }
     }
 }
