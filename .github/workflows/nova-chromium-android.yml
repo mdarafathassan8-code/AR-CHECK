@@ -1,21 +1,11 @@
-name: Nova Chromium Android APK
+name: Nova Android APK (GitHub Runner)
 
 on:
   workflow_dispatch:
-    inputs:
-      target_cpu:
-        description: Android CPU architecture
-        required: true
-        default: arm64
-        type: choice
-        options:
-          - arm64
-          - arm
-          - x64
-          - x86
   push:
     paths:
       - 'android-chromium/**'
+      - 'mobile/**'
       - 'chromium-integration/**'
       - '.github/workflows/nova-chromium-android.yml'
 
@@ -24,91 +14,50 @@ permissions:
 
 jobs:
   build:
-    # A full Chromium Android checkout/build is too large for the normal
-    # GitHub-hosted runner. Configure a Linux x64 self-hosted runner with
-    # substantial RAM, CPU and free disk before running this workflow.
-    runs-on: [self-hosted, linux, x64]
-    timeout-minutes: 720
-    env:
-      CHROMIUM_DIR: ${{ runner.temp }}/chromium
-      OUT_DIR: out/Nova
-      TARGET_CPU: ${{ inputs.target_cpu || 'arm64' }}
+    # Phone-friendly CI: uses a GitHub-hosted Ubuntu runner.
+    # This builds the existing Android app project; it does NOT compile the
+    # full Chromium source tree (which requires a much larger build machine).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
 
     steps:
-      - name: Checkout Nova integration
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install depot_tools
-        shell: bash
-        run: |
-          set -euxo pipefail
-          if [ ! -d "$HOME/depot_tools" ]; then
-            git clone --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git "$HOME/depot_tools"
-          fi
-          echo "$HOME/depot_tools" >> "$GITHUB_PATH"
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
 
-      - name: Checkout Chromium for Android
-        shell: bash
-        run: |
-          set -euxo pipefail
-          rm -rf "$CHROMIUM_DIR"
-          mkdir -p "$CHROMIUM_DIR"
-          cd "$CHROMIUM_DIR"
-          fetch --nohooks android
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
 
-      - name: Install Chromium Android dependencies
-        shell: bash
+      - name: Install Android SDK packages
         run: |
-          set -euxo pipefail
-          cd "$CHROMIUM_DIR/src"
-          ./build/install-build-deps.sh --android
-          gclient runhooks
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
-      - name: Apply Nova integration
-        shell: bash
-        run: |
-          set -euxo pipefail
-          "$GITHUB_WORKSPACE/chromium-integration/apply_nova_extension_patch.sh" "$CHROMIUM_DIR/src"
+      - name: Make Gradle executable
+        run: chmod +x android-chromium/gradlew
 
-      - name: Configure GN
-        shell: bash
-        run: |
-          set -euxo pipefail
-          cd "$CHROMIUM_DIR/src"
-          mkdir -p "$OUT_DIR"
-          cat > "$OUT_DIR/args.gn" <<EOF
-          target_os = "android"
-          target_cpu = "$TARGET_CPU"
-          enable_extensions = true
-          enable_desktop_android_extensions = true
-          is_component_build = false
-          is_debug = false
-          symbol_level = 0
-          EOF
-          gn gen "$OUT_DIR"
-          gn args "$OUT_DIR" --list | grep -E 'target_os|target_cpu|enable_extensions|enable_desktop_android_extensions' || true
+      - name: Build debug APK
+        working-directory: android-chromium
+        run: ./gradlew assembleDebug --stacktrace
 
-      - name: Build Nova Android APK
-        shell: bash
+      - name: Collect APK
         run: |
           set -euxo pipefail
-          cd "$CHROMIUM_DIR/src"
-          autoninja -C "$OUT_DIR" chrome_public_apk
-
-      - name: Collect APK and checksums
-        shell: bash
-        run: |
-          set -euxo pipefail
-          mkdir -p "$GITHUB_WORKSPACE/artifacts"
-          find "$CHROMIUM_DIR/src/$OUT_DIR" -type f -name '*.apk' -exec cp {} "$GITHUB_WORKSPACE/artifacts/" \;
-          test -n "$(find "$GITHUB_WORKSPACE/artifacts" -type f -name '*.apk' -print -quit)"
-          cd "$GITHUB_WORKSPACE/artifacts"
+          mkdir -p artifacts
+          find android-chromium -type f -name '*.apk' -exec cp {} artifacts/ \;
+          test -n "$(find artifacts -type f -name '*.apk' -print -quit)"
+          cd artifacts
           sha256sum *.apk | tee SHA256SUMS.txt
 
-      - name: Upload Nova APK artifact
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nova-chromium-android-${{ env.TARGET_CPU }}
+          name: nova-android-debug-apk
           path: artifacts/*
           if-no-files-found: error
           retention-days: 14
