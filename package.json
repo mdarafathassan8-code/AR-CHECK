@@ -1,0 +1,20 @@
+{
+  "name": "nova-browser",
+  "version": "1.0.0",
+  "description": "A Google-inspired desktop browser built with Electron and Chromium.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win --x64"
+  },
+  "devDependencies": {
+    "electron": "^43.4.1",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.nova.browser",
+    "productName": "Nova Browser",
+    "files": ["main.js", "preload.js", "renderer/**/*", "package.json"],
+    "win": { "target": "nsis" }
+  }
+}
