@@ -5,16 +5,16 @@ on:
   push:
     paths:
       - 'android-chromium/**'
+      - 'chromium-integration/**'
       - '.github/workflows/nova-chromium-android.yml'
 
-# IMPORTANT: use a Linux self-hosted runner with enough storage/RAM for a Chromium
-# checkout. Current Chromium Android docs recommend 8GB+ RAM, >16GB preferred,
-# and about 100GB free disk. Standard hosted runners are generally not suitable.
 permissions:
   contents: read
 
 jobs:
   build:
+    # Chromium Android is a very large build. Use a self-hosted Linux x64
+    # runner with enough disk/RAM for a full Chromium checkout and build.
     runs-on: [self-hosted, linux, x64]
     timeout-minutes: 720
     env:
@@ -31,8 +31,6 @@ jobs:
           set -euxo pipefail
           if [ ! -d "$HOME/depot_tools" ]; then
             git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git "$HOME/depot_tools"
-          else
-            git -C "$HOME/depot_tools" fetch --prune origin
           fi
           echo "$HOME/depot_tools" >> "$GITHUB_PATH"
 
@@ -53,21 +51,11 @@ jobs:
           ./build/install-build-deps.sh --android
           gclient runhooks
 
-      - name: Apply Nova Chromium patches
+      - name: Apply Nova extension integration
         shell: bash
         run: |
           set -euxo pipefail
-          cd "$CHROMIUM_DIR/src"
-          PATCH_ROOT="$GITHUB_WORKSPACE/android-chromium/chromium-integration/patches"
-          if [ -d "$PATCH_ROOT" ] && find "$PATCH_ROOT" -maxdepth 1 -name '*.patch' -print -quit | grep -q .; then
-            for patch in "$PATCH_ROOT"/*.patch; do
-              git apply --3way "$patch"
-            done
-          else
-            echo 'No Chromium integration patches are committed yet.'
-            echo 'Building stock Chromium would not produce the Nova extension-enabled browser.'
-            exit 1
-          fi
+          "$GITHUB_WORKSPACE/chromium-integration/apply_nova_extension_patch.sh" "$CHROMIUM_DIR/src"
 
       - name: Configure GN
         shell: bash
