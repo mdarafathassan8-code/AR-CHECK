@@ -66,6 +66,8 @@ jobs:
           cat > "$OUT_DIR/args.gn" <<'EOF'
           target_os = "android"
           target_cpu = "arm64"
+          enable_extensions = true
+          enable_desktop_android_extensions = true
           is_component_build = false
           is_debug = false
           symbol_level = 0
