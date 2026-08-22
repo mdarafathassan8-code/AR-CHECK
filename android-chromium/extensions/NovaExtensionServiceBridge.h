@@ -3,6 +3,7 @@
 
 #include <string>
 #include "base/files/file_path.h"
+#include "base/memory/raw_ptr.h"
 
 class Profile;
 namespace extensions { class ExtensionService; }
@@ -19,6 +20,7 @@ class NovaExtensionServiceBridge {
   bool InstallCrx(const base::FilePath& path);
   bool Enable(const std::string& id);
   bool Disable(const std::string& id);
+  bool Reload(const std::string& id);
   bool Uninstall(const std::string& id);
 
  private:
