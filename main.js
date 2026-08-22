@@ -1,115 +1,23 @@
-const { app, BrowserWindow, WebContentsView, ipcMain, session, dialog } = require('electron');
+const { app, BrowserWindow, WebContentsView, ipcMain, session, dialog, Menu } = require('electron');
 const path = require('path');
-
-let win;
-const tabs = new Map();
-let activeId = null;
-let nextId = 1;
-const HOME = 'file://' + path.join(__dirname, 'renderer', 'home.html');
-
-function makeTab(url = HOME) {
-  const id = nextId++;
-  const view = new WebContentsView({
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      sandbox: true
-    }
-  });
-  tabs.set(id, { id, view, url });
-  view.webContents.setWindowOpenHandler(({ url }) => {
-    makeTab(url);
-    return { action: 'deny' };
-  });
-  view.webContents.on('did-navigate', () => sendState(id));
-  view.webContents.on('did-navigate-in-page', () => sendState(id));
-  view.webContents.on('page-title-updated', () => sendState(id));
-  view.webContents.on('did-finish-load', () => sendState(id));
-  view.webContents.loadURL(url);
-  return id;
-}
-
-function sendState(id) {
-  const t = tabs.get(id);
-  if (!t || !win || win.isDestroyed()) return;
-  win.webContents.send('tab-state', {
-    id,
-    title: t.view.webContents.getTitle() || 'New Tab',
-    url: t.view.webContents.getURL(),
-    canGoBack: t.view.webContents.canGoBack(),
-    canGoForward: t.view.webContents.canGoForward(),
-    active: id === activeId
-  });
-}
-
-function showTab(id) {
-  const t = tabs.get(id);
-  if (!t) return;
-  if (activeId && tabs.has(activeId)) win.contentView.removeChildView(tabs.get(activeId).view);
-  activeId = id;
-  win.contentView.addChildView(t.view);
-  layout();
-  for (const key of tabs.keys()) sendState(key);
-}
-
-function closeTab(id) {
-  const t = tabs.get(id);
-  if (!t) return;
-  const wasActive = activeId === id;
-  if (wasActive) win.contentView.removeChildView(t.view);
-  t.view.webContents.close();
-  tabs.delete(id);
-  if (!tabs.size) {
-    const newId = makeTab();
-    showTab(newId);
-  } else if (wasActive) {
-    showTab([...tabs.keys()][Math.max(0, [...tabs.keys()].indexOf(id) - 1)] || [...tabs.keys()][0]);
-  }
-  win.webContents.send('tabs-reset');
-  for (const key of tabs.keys()) sendState(key);
-}
-
-function layout() {
-  if (!win || !activeId || !tabs.has(activeId)) return;
-  const bounds = win.getContentBounds();
-  tabs.get(activeId).view.setBounds({ x: 0, y: 112, width: bounds.width, height: Math.max(0, bounds.height - 112) });
-}
-
-function createWindow() {
-  win = new BrowserWindow({ width: 1400, height: 900, minWidth: 900, minHeight: 600, title: 'Nova Browser', webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: true } });
-  win.loadFile(path.join(__dirname, 'renderer', 'chrome.html'));
-  win.on('resize', layout);
-  win.on('closed', () => { for (const t of tabs.values()) t.view.webContents.close(); });
-  win.webContents.once('did-finish-load', () => { const id = makeTab(); showTab(id); });
-}
-
-app.whenReady().then(createWindow);
-app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
-app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) createWindow(); });
-
-ipcMain.handle('new-tab', (_, url) => { const id = makeTab(url || HOME); showTab(id); return id; });
-ipcMain.on('switch-tab', (_, id) => showTab(Number(id)));
-ipcMain.on('close-tab', (_, id) => closeTab(Number(id)));
-ipcMain.on('navigate', (_, value) => {
-  const t = tabs.get(activeId); if (!t) return;
-  let target = String(value || '').trim();
-  if (!target) return;
-  if (!/^https?:\/\//i.test(target)) {
-    if (/^[\w.-]+\.[a-z]{2,}(\/.*)?$/i.test(target)) target = 'https://' + target;
-    else target = 'https://www.google.com/search?q=' + encodeURIComponent(target);
-  }
-  t.view.webContents.loadURL(target);
-});
-ipcMain.on('back', () => { const t=tabs.get(activeId); if(t?.view.webContents.canGoBack()) t.view.webContents.goBack(); });
-ipcMain.on('forward', () => { const t=tabs.get(activeId); if(t?.view.webContents.canGoForward()) t.view.webContents.goForward(); });
-ipcMain.on('reload', () => tabs.get(activeId)?.view.webContents.reload());
-ipcMain.handle('get-tabs', () => [...tabs.values()].map(t => ({ id:t.id, title:t.view.webContents.getTitle() || 'New Tab', url:t.view.webContents.getURL(), active:t.id===activeId })));
-ipcMain.handle('install-extension', async () => {
-  const result = await dialog.showOpenDialog(win, { properties:['openDirectory'], title:'Select unpacked Chrome extension folder' });
-  if (result.canceled || !result.filePaths[0]) return { ok:false };
-  try {
-    const ext = await session.defaultSession.loadExtension(result.filePaths[0], { allowFileAccess: true });
-    return { ok:true, name:ext.name, id:ext.id };
-  } catch (e) { return { ok:false, error:e.message }; }
-});
-ipcMain.handle('active-state', () => { const t=tabs.get(activeId); return t ? {id:activeId,url:t.view.webContents.getURL(),title:t.view.webContents.getTitle()} : null; });
+const fs = require('fs');
+let win, activeId=null, nextId=1;
+const tabs=new Map();
+const HOME='file://'+path.join(__dirname,'renderer','home.html');
+const DATA=path.join(app.getPath('userData'),'nova-data.json');
+let store={bookmarks:[],history:[],extensions:[]};
+function loadStore(){try{if(fs.existsSync(DATA))store={...store,...JSON.parse(fs.readFileSync(DATA,'utf8'))}}catch(e){}}
+function saveStore(){try{fs.mkdirSync(path.dirname(DATA),{recursive:true});fs.writeFileSync(DATA,JSON.stringify(store,null,2))}catch(e){}}
+function addHistory(url,title){if(!/^https?:/i.test(url))return;store.history=[{url,title:title||url,time:Date.now()},...store.history.filter(x=>x.url!==url)].slice(0,500);saveStore()}
+function makeTab(url=HOME){const id=nextId++;const view=new WebContentsView({webPreferences:{preload:path.join(__dirname,'preload.js'),contextIsolation:true,sandbox:true}});tabs.set(id,{id,view});view.webContents.setWindowOpenHandler(({url})=>{const n=makeTab(url);showTab(n);return{action:'deny'}});const state=()=>sendState(id);view.webContents.on('did-navigate',()=>{addHistory(view.webContents.getURL(),view.webContents.getTitle());state()});view.webContents.on('did-navigate-in-page',state);view.webContents.on('page-title-updated',state);view.webContents.on('did-finish-load',state);view.webContents.on('context-menu',(_,p)=>Menu.buildFromTemplate([{label:'Back',enabled:view.webContents.canGoBack(),click:()=>view.webContents.goBack()},{label:'Forward',enabled:view.webContents.canGoForward(),click:()=>view.webContents.goForward()},{type:'separator'},{label:'Reload',click:()=>view.webContents.reload()},{label:'Copy',role:'copy',enabled:!!p.selectionText},{label:'Inspect',click:()=>view.webContents.inspectElement(p.x,p.y)}]).popup({window:win}));view.webContents.loadURL(url);return id}
+function sendState(id){const t=tabs.get(id);if(!t||!win||win.isDestroyed())return;win.webContents.send('tab-state',{id,title:t.view.webContents.getTitle()||'New Tab',url:t.view.webContents.getURL(),canGoBack:t.view.webContents.canGoBack(),canGoForward:t.view.webContents.canGoForward(),active:id===activeId})}
+function showTab(id){const t=tabs.get(id);if(!t)return;if(activeId&&tabs.has(activeId))win.contentView.removeChildView(tabs.get(activeId).view);activeId=id;win.contentView.addChildView(t.view);layout();tabs.forEach((_,k)=>sendState(k))}
+function closeTab(id){const t=tabs.get(id);if(!t)return;const was=activeId===id;if(was)win.contentView.removeChildView(t.view);t.view.webContents.close();tabs.delete(id);if(!tabs.size)showTab(makeTab());else if(was)showTab([...tabs.keys()][0]);win.webContents.send('tabs-reset')}
+function layout(){if(!win||!activeId||!tabs.has(activeId))return;const b=win.getContentBounds();tabs.get(activeId).view.setBounds({x:0,y:112,width:b.width,height:Math.max(0,b.height-112)})}
+function createWindow(){win=new BrowserWindow({width:1400,height:900,minWidth:900,minHeight:600,title:'Nova Browser',webPreferences:{preload:path.join(__dirname,'preload.js'),contextIsolation:true,sandbox:true}});win.loadFile(path.join(__dirname,'renderer','chrome.html'));win.on('resize',layout);win.webContents.once('did-finish-load',()=>showTab(makeTab()))}
+app.whenReady().then(()=>{loadStore();createWindow()});app.on('window-all-closed',()=>{if(process.platform!=='darwin')app.quit()});app.on('activate',()=>{if(!BrowserWindow.getAllWindows().length)createWindow()});
+ipcMain.handle('new-tab',(_,url)=>{const id=makeTab(url||HOME);showTab(id);return id});ipcMain.on('switch-tab',(_,id)=>showTab(Number(id)));ipcMain.on('close-tab',(_,id)=>closeTab(Number(id)));
+ipcMain.on('navigate',(_,v)=>{const t=tabs.get(activeId);if(!t)return;let u=String(v||'').trim();if(!u)return;if(!/^https?:\/\//i.test(u))u=/^[\w.-]+\.[a-z]{2,}(\/.*)?$/i.test(u)?'https://'+u:'https://www.google.com/search?q='+encodeURIComponent(u);t.view.webContents.loadURL(u)});ipcMain.on('back',()=>{const t=tabs.get(activeId);if(t?.view.webContents.canGoBack())t.view.webContents.goBack()});ipcMain.on('forward',()=>{const t=tabs.get(activeId);if(t?.view.webContents.canGoForward())t.view.webContents.goForward()});ipcMain.on('reload',()=>tabs.get(activeId)?.view.webContents.reload());
+ipcMain.handle('get-tabs',()=>[...tabs.values()].map(t=>({id:t.id,title:t.view.webContents.getTitle()||'New Tab',url:t.view.webContents.getURL(),active:t.id===activeId})));
+ipcMain.handle('install-extension',async()=>{const r=await dialog.showOpenDialog(win,{properties:['openDirectory'],title:'Select unpacked Chrome extension folder'});if(r.canceled)return{ok:false};try{const e=await session.defaultSession.loadExtension(r.filePaths[0],{allowFileAccess:true});store.extensions=[...(store.extensions||[]).filter(x=>x.id!==e.id),{id:e.id,name:e.name,path:r.filePaths[0]}];saveStore();return{ok:true,name:e.name,id:e.id}}catch(e){return{ok:false,error:e.message}}});
+ipcMain.handle('get-bookmarks',()=>store.bookmarks);ipcMain.handle('add-bookmark',(_,x)=>{if(!x?.url)return false;store.bookmarks=[x,...store.bookmarks.filter(b=>b.url!==x.url)];saveStore();return true});ipcMain.handle('remove-bookmark',(_,u)=>{store.bookmarks=store.bookmarks.filter(b=>b.url!==u);saveStore();return true});ipcMain.handle('get-history',()=>store.history);ipcMain.handle('clear-history',()=>{store.history=[];saveStore();return true});ipcMain.handle('get-extensions',()=>store.extensions||[]);ipcMain.handle('active-state',()=>{const t=tabs.get(activeId);return t?{id:activeId,url:t.view.webContents.getURL(),title:t.view.webContents.getTitle()}:null});
