@@ -1,16 +1,2 @@
-const { contextBridge, ipcRenderer } = require('electron');
-
-contextBridge.exposeInMainWorld('nova', {
-  newTab: (url) => ipcRenderer.invoke('new-tab', url),
-  switchTab: (id) => ipcRenderer.send('switch-tab', id),
-  closeTab: (id) => ipcRenderer.send('close-tab', id),
-  navigate: (value) => ipcRenderer.send('navigate', value),
-  back: () => ipcRenderer.send('back'),
-  forward: () => ipcRenderer.send('forward'),
-  reload: () => ipcRenderer.send('reload'),
-  getTabs: () => ipcRenderer.invoke('get-tabs'),
-  installExtension: () => ipcRenderer.invoke('install-extension'),
-  activeState: () => ipcRenderer.invoke('active-state'),
-  onTabState: (fn) => ipcRenderer.on('tab-state', (_, data) => fn(data)),
-  onTabsReset: (fn) => ipcRenderer.on('tabs-reset', () => fn())
-});
+const {contextBridge,ipcRenderer}=require('electron');
+contextBridge.exposeInMainWorld('nova',{newTab:u=>ipcRenderer.invoke('new-tab',u),switchTab:i=>ipcRenderer.send('switch-tab',i),closeTab:i=>ipcRenderer.send('close-tab',i),navigate:v=>ipcRenderer.send('navigate',v),back:()=>ipcRenderer.send('back'),forward:()=>ipcRenderer.send('forward'),reload:()=>ipcRenderer.send('reload'),getTabs:()=>ipcRenderer.invoke('get-tabs'),installExtension:()=>ipcRenderer.invoke('install-extension'),getBookmarks:()=>ipcRenderer.invoke('get-bookmarks'),addBookmark:x=>ipcRenderer.invoke('add-bookmark',x),removeBookmark:u=>ipcRenderer.invoke('remove-bookmark',u),getHistory:()=>ipcRenderer.invoke('get-history'),clearHistory:()=>ipcRenderer.invoke('clear-history'),getExtensions:()=>ipcRenderer.invoke('get-extensions'),activeState:()=>ipcRenderer.invoke('active-state'),onTabState:fn=>ipcRenderer.on('tab-state',(_,d)=>fn(d)),onTabsReset:fn=>ipcRenderer.on('tabs-reset',fn)});
