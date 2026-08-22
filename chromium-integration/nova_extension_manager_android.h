@@ -6,6 +6,7 @@
 #include <string>
 #include "base/callback.h"
 #include "base/files/file_path.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 
 class Profile;
@@ -13,15 +14,8 @@ class Profile;
 namespace extensions {
 
 // Android-facing bridge for installing and managing user extensions.
-// Supported input types:
-//   .crx       -> CrxInstaller
-//   directory  -> UnpackedInstaller
-//   .zip       -> extracted to a private temporary directory, then
-//                 UnpackedInstaller
-//
-// All methods must be called on the UI thread. The bridge intentionally uses
-// Chromium's existing ExtensionService/ExtensionRegistry instead of creating
-// a second extension runtime.
+// Supported input types: CRX, ZIP and an unpacked extension directory.
+// All public methods must be called on Chromium's UI thread.
 class NovaExtensionManagerAndroid {
  public:
   using ResultCallback = base::OnceCallback<void(bool success,
@@ -47,7 +41,6 @@ class NovaExtensionManagerAndroid {
   void InstallCrx(const base::FilePath& crx, ResultCallback callback);
   void InstallUnpacked(const base::FilePath& directory,
                        ResultCallback callback);
-
   void Finish(ResultCallback callback, bool success, std::string message);
 
   raw_ptr<Profile> profile_ = nullptr;
