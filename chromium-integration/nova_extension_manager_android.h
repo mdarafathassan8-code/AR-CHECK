@@ -3,9 +3,13 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_NOVA_EXTENSION_MANAGER_ANDROID_H_
 #define CHROME_BROWSER_EXTENSIONS_NOVA_EXTENSION_MANAGER_ANDROID_H_
 
+#include <memory>
 #include <string>
+#include <vector>
+
 #include "base/callback.h"
 #include "base/files/file_path.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 
@@ -44,6 +48,9 @@ class NovaExtensionManagerAndroid {
   void Finish(ResultCallback callback, bool success, std::string message);
 
   raw_ptr<Profile> profile_ = nullptr;
+  // Keeps ZIP extraction roots alive while Chromium finishes registering the
+  // unpacked extension. The normal ExtensionService owns the installed copy.
+  std::vector<std::unique_ptr<base::ScopedTempDir>> zip_temp_dirs_;
   base::WeakPtrFactory<NovaExtensionManagerAndroid> weak_factory_{this};
 };
 
