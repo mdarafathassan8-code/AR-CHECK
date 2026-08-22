@@ -82,11 +82,10 @@ void NovaExtensionManagerAndroid::InstallCrx(const base::FilePath& crx,
           self->Finish(std::move(callback), true, "CRX installed");
           return;
         }
-        const std::string message =
-            base::UTF16ToUTF8(error->message()).empty()
-                ? "CRX installation failed"
-                : base::UTF16ToUTF8(error->message());
-        self->Finish(std::move(callback), false, message);
+        std::string message = base::UTF16ToUTF8(error->message());
+        if (message.empty())
+          message = "CRX installation failed";
+        self->Finish(std::move(callback), false, std::move(message));
       },
       weak_factory_.GetWeakPtr(), std::move(callback)));
   installer->InstallCrx(crx);
@@ -103,7 +102,6 @@ void NovaExtensionManagerAndroid::InstallZip(const base::FilePath& zip_file,
   }
 
   const base::FilePath destination = temp_dir->GetPath();
-  auto* temp_dir_raw = temp_dir.get();
   zip_temp_dirs_.push_back(std::move(temp_dir));
 
   base::ThreadPool::PostTaskAndReply(
@@ -126,7 +124,6 @@ void NovaExtensionManagerAndroid::InstallZip(const base::FilePath& zip_file,
             self->InstallUnpacked(destination, std::move(callback));
           },
           weak_factory_.GetWeakPtr(), destination, std::move(callback)));
-  (void)temp_dir_raw;
 }
 
 void NovaExtensionManagerAndroid::InstallUnpacked(
@@ -157,7 +154,8 @@ void NovaExtensionManagerAndroid::Uninstall(const std::string& extension_id,
     return;
   }
   std::u16string error;
-  const bool ok = service->UninstallExtension(extension_id, false, &error);
+  const bool ok = service->UninstallExtension(
+      extension_id, UNINSTALL_REASON_USER_INITIATED, &error);
   Finish(std::move(callback), ok,
          ok ? "Extension removed" : base::UTF16ToUTF8(error));
 }
