@@ -1,0 +1,107 @@
+name: Nova Chromium Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'android-chromium/**'
+      - '.github/workflows/nova-chromium-android.yml'
+
+# IMPORTANT: use a Linux self-hosted runner with enough storage/RAM for a Chromium
+# checkout. Current Chromium Android docs recommend 8GB+ RAM, >16GB preferred,
+# and about 100GB free disk. Standard hosted runners are generally not suitable.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 720
+    env:
+      CHROMIUM_DIR: ${{ runner.temp }}/chromium
+      OUT_DIR: out/Nova
+
+    steps:
+      - name: Checkout Nova integration
+        uses: actions/checkout@v4
+
+      - name: Install depot_tools
+        shell: bash
+        run: |
+          set -euxo pipefail
+          if [ ! -d "$HOME/depot_tools" ]; then
+            git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git "$HOME/depot_tools"
+          else
+            git -C "$HOME/depot_tools" fetch --prune origin
+          fi
+          echo "$HOME/depot_tools" >> "$GITHUB_PATH"
+
+      - name: Checkout Chromium for Android
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rm -rf "$CHROMIUM_DIR"
+          mkdir -p "$CHROMIUM_DIR"
+          cd "$CHROMIUM_DIR"
+          fetch --nohooks android
+
+      - name: Install Chromium Android dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd "$CHROMIUM_DIR/src"
+          ./build/install-build-deps.sh --android
+          gclient runhooks
+
+      - name: Apply Nova Chromium patches
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd "$CHROMIUM_DIR/src"
+          PATCH_ROOT="$GITHUB_WORKSPACE/android-chromium/chromium-integration/patches"
+          if [ -d "$PATCH_ROOT" ] && find "$PATCH_ROOT" -maxdepth 1 -name '*.patch' -print -quit | grep -q .; then
+            for patch in "$PATCH_ROOT"/*.patch; do
+              git apply --3way "$patch"
+            done
+          else
+            echo 'No Chromium integration patches are committed yet.'
+            echo 'Building stock Chromium would not produce the Nova extension-enabled browser.'
+            exit 1
+          fi
+
+      - name: Configure GN
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd "$CHROMIUM_DIR/src"
+          mkdir -p "$OUT_DIR"
+          cat > "$OUT_DIR/args.gn" <<'EOF'
+          target_os = "android"
+          target_cpu = "arm64"
+          is_component_build = false
+          is_debug = false
+          symbol_level = 0
+          EOF
+          gn gen "$OUT_DIR"
+
+      - name: Build Nova APK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd "$CHROMIUM_DIR/src"
+          autoninja -C "$OUT_DIR" chrome_public_apk
+
+      - name: Collect APK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/artifacts"
+          find "$CHROMIUM_DIR/src/$OUT_DIR" -type f -name '*.apk' -exec cp {} "$GITHUB_WORKSPACE/artifacts/" \;
+          test -n "$(find "$GITHUB_WORKSPACE/artifacts" -type f -name '*.apk' -print -quit)"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: nova-chromium-android-apk
+          path: artifacts/*.apk
+          if-no-files-found: error
