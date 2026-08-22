@@ -1,0 +1,10 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:orientation="vertical" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#ffffff">
+ <LinearLayout android:padding="8dp" android:gravity="center_vertical" android:layout_width="match_parent" android:layout_height="56dp">
+  <Button android:id="@+id/back" android:text="‹" android:minWidth="42dp" android:layout_width="48dp" android:layout_height="48dp"/>
+  <Button android:id="@+id/forward" android:text="›" android:minWidth="42dp" android:layout_width="48dp" android:layout_height="48dp"/>
+  <EditText android:id="@+id/address" android:hint="Search or enter address" android:singleLine="true" android:inputType="textUri" android:layout_width="0dp" android:layout_weight="1" android:layout_height="44dp" android:background="#f1f3f4" android:paddingStart="16dp" android:paddingEnd="16dp"/>
+  <Button android:id="@+id/go" android:text="↵" android:layout_width="48dp" android:layout_height="48dp"/>
+  <Button android:id="@+id/menu" android:text="⋮" android:layout_width="48dp" android:layout_height="48dp"/>
+ </LinearLayout>
+ <org.mozilla.geckoview.GeckoView android:id="@+id/geckoview" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"/>
+</LinearLayout>
