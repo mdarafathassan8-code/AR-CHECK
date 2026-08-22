@@ -3,18 +3,21 @@
 
 #include "chrome/browser/extensions/nova_extension_manager_android.h"
 
+#include <optional>
 #include <utility>
 
-#include "base/files/scoped_temp_dir.h"
+#include "base/files/file_util.h"
 #include "base/functional/bind.h"
-#include "base/logging.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/task/thread_pool.h"
+#include "content/public/browser/browser_thread.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "extensions/browser/extension_registry.h"
+#include "extensions/browser/install/crx_install_error.h"
 #include "extensions/common/extension.h"
 #include "third_party/zlib/google/zip.h"
 
@@ -45,7 +48,6 @@ void NovaExtensionManagerAndroid::Install(const base::FilePath& source,
     InstallZip(source, std::move(callback));
     return;
   }
-
   if (base::DirectoryExists(source)) {
     InstallUnpacked(source, std::move(callback));
     return;
@@ -64,33 +66,36 @@ void NovaExtensionManagerAndroid::InstallCrx(const base::FilePath& crx,
     return;
   }
 
-  // CRX verification, manifest validation and installation are delegated to
-  // Chromium's existing CrxInstaller. This preserves the normal extension
-  // security model rather than implementing a second CRX parser.
+  // CRX3 signature verification, manifest validation, policy checks and the
+  // actual registration are delegated to Chromium's existing installer.
   scoped_refptr<CrxInstaller> installer = CrxInstaller::CreateSilent(service);
-  installer->AddInstallerCallback(base::BindOnce(
-      [](base::WeakPtr<NovaExtensionManagerAndroid> self,
-         ResultCallback callback, const CrxInstallError& error) {
-        if (!self)
-          return;
-        if (error.error_code() == CrxInstallErrorType::NONE) {
-          self->Finish(std::move(callback), true, "CRX installed");
-        } else {
-          self->Finish(std::move(callback), false,
-                       error.message().empty() ? "CRX installation failed"
-                                               : error.message());
-        }
-      },
-      weak_factory_.GetWeakPtr(), std::move(callback)));
+  installer->set_allow_silent_install(true);
   installer->set_off_store_install_allow_reason(
       CrxInstaller::OffStoreInstallAllowedFromSettingsPage);
+  installer->AddInstallerCallback(base::BindOnce(
+      [](base::WeakPtr<NovaExtensionManagerAndroid> self,
+         ResultCallback callback,
+         const std::optional<CrxInstallError>& error) {
+        if (!self)
+          return;
+        if (!error.has_value()) {
+          self->Finish(std::move(callback), true, "CRX installed");
+          return;
+        }
+        const std::string message =
+            base::UTF16ToUTF8(error->message()).empty()
+                ? "CRX installation failed"
+                : base::UTF16ToUTF8(error->message());
+        self->Finish(std::move(callback), false, message);
+      },
+      weak_factory_.GetWeakPtr(), std::move(callback)));
   installer->InstallCrx(crx);
 }
 
 void NovaExtensionManagerAndroid::InstallZip(const base::FilePath& zip_file,
                                              ResultCallback callback) {
-  // ZIP is treated as an unpacked extension after safe extraction. Chromium's
-  // zip::Unzip rejects unsafe archive paths, preventing ../ traversal.
+  // ZIP is treated as an unpacked extension after extraction. Chromium's
+  // zip::Unzip rejects unsafe paths such as ../ traversal entries.
   auto temp_dir = std::make_unique<base::ScopedTempDir>();
   if (!temp_dir->CreateUniqueTempDir()) {
     Finish(std::move(callback), false, "Could not create extension temp dir");
@@ -98,7 +103,9 @@ void NovaExtensionManagerAndroid::InstallZip(const base::FilePath& zip_file,
   }
 
   const base::FilePath destination = temp_dir->GetPath();
-  auto temp_dir_holder = temp_dir.release();
+  auto* temp_dir_raw = temp_dir.get();
+  zip_temp_dirs_.push_back(std::move(temp_dir));
+
   base::ThreadPool::PostTaskAndReply(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_BLOCKING},
       base::BindOnce(
@@ -108,7 +115,6 @@ void NovaExtensionManagerAndroid::InstallZip(const base::FilePath& zip_file,
           zip_file, destination),
       base::BindOnce(
           [](base::WeakPtr<NovaExtensionManagerAndroid> self,
-             std::unique_ptr<base::ScopedTempDir> extracted,
              base::FilePath destination, ResultCallback callback, bool ok) {
             if (!self)
               return;
@@ -118,13 +124,9 @@ void NovaExtensionManagerAndroid::InstallZip(const base::FilePath& zip_file,
               return;
             }
             self->InstallUnpacked(destination, std::move(callback));
-            // Keep the extraction alive until the installer has consumed it.
-            // The browser's normal extension install directory becomes the
-            // persistent location for the installed extension.
-            (void)extracted.release();
           },
-          weak_factory_.GetWeakPtr(), std::unique_ptr<base::ScopedTempDir>(temp_dir_holder),
-          destination, std::move(callback)));
+          weak_factory_.GetWeakPtr(), destination, std::move(callback)));
+  (void)temp_dir_raw;
 }
 
 void NovaExtensionManagerAndroid::InstallUnpacked(
@@ -137,14 +139,13 @@ void NovaExtensionManagerAndroid::InstallUnpacked(
     return;
   }
 
-  // UnpackedInstaller performs manifest validation and registers the extension
-  // with ExtensionService. It is also the same path used by Chromium's
-  // developer-mode tests for unpacked extensions.
+  // This is Chromium's developer-mode installer path. It validates
+  // manifest.json and registers the unpacked extension with ExtensionService.
   auto installer = UnpackedInstaller::Create(service);
   installer->Load(directory);
 
-  // Installation is asynchronous. Observe ExtensionRegistry for the ID after
-  // manifest validation; callers can refresh the manager after the callback.
+  // UnpackedInstaller::Load() is asynchronous and has no simple result
+  // callback. The UI should refresh its extension list after the load event.
   Finish(std::move(callback), true, "Unpacked extension load requested");
 }
 
@@ -155,10 +156,10 @@ void NovaExtensionManagerAndroid::Uninstall(const std::string& extension_id,
     Finish(std::move(callback), false, "Extension service unavailable");
     return;
   }
-  std::string error;
+  std::u16string error;
   const bool ok = service->UninstallExtension(extension_id, false, &error);
-  Finish(std::move(callback), ok, ok ? "Extension removed"
-                                    : (error.empty() ? "Uninstall failed" : error));
+  Finish(std::move(callback), ok,
+         ok ? "Extension removed" : base::UTF16ToUTF8(error));
 }
 
 void NovaExtensionManagerAndroid::Enable(const std::string& extension_id,
